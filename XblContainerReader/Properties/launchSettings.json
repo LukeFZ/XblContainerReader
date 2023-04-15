@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "XblContainerReader": {
+      "commandName": "Project",
+      "commandLineArgs": "\"C:\\Users\\lukef\\AppData\\Local\\Packages\\BethesdaSoftworks.Hibiki_3275kfvn8vcwc\\SystemAppData\\wgs\\000901F297560035_00000000000000000000000076CB1B01\" output-hifi"
+    }
+  }
+}
