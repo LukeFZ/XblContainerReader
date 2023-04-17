@@ -1,9 +1,9 @@
 ﻿namespace LibXblContainer.Models;
 
-public readonly struct ContainerIndexMetaData
+public class ContainerIndexMetaData
 {
     public readonly uint Version;
-    public readonly int EntryCount;
+    public int EntryCount { get; internal set; }
 
     // Metadata
     public readonly string? NonAppOwner;

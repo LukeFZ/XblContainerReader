@@ -21,6 +21,8 @@ public class ContainerIndex
 
     public void Write(BinaryWriter writer)
     {
+        MetaData.EntryCount = Entries.Count;
+
         MetaData.Write(writer);
         foreach (var entry in Entries)
             entry.Write(writer, MetaData.Version);

@@ -64,4 +64,16 @@ public class Container
         var newFile = new FileInfo(blobPath);
         MetaData.Update(newFile);
     }
+
+    public async Task UpdateAsync(Stream newData, string? blobName = null)
+    {
+        var blobPath = GetBlobPath(blobName == null ? Records.Records[0] : GetBlob(blobName));
+
+        var blobStream = File.OpenWrite(blobPath);
+        await newData.CopyToAsync(blobStream);
+        blobStream.Close();
+
+        var newFile = new FileInfo(blobPath);
+        MetaData.Update(newFile);
+    }
 }
