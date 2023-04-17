@@ -4,6 +4,14 @@
     <TargetFramework>net7.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <GeneratePackageOnBuild>True</GeneratePackageOnBuild>
+    <Title>LibXblContainer</Title>
+    <Authors>LukeFZ</Authors>
+    <Description>Library for working with UWP / Xbox Game Pass game saves.</Description>
+    <Copyright>MIT</Copyright>
+    <RepositoryUrl>https://github.com/LukeFZ/XblContainerReader</RepositoryUrl>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageRequireLicenseAcceptance>False</PackageRequireLicenseAcceptance>
   </PropertyGroup>
 
 </Project>
