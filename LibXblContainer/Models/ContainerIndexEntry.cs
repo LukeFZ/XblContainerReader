@@ -7,10 +7,10 @@ public class ContainerIndexEntry
     public string Etag { get; set; }
 
     public byte BlobId { get; }
-    public uint UnkInt { get; }
+    public ContainerIndexEntryState State { get; set; }
     public Guid ContainerId { get; }
     public DateTime LastModified { get; set; }
-    public uint UnkInt2 { get; }
+    public ContainerEntryType Type { get; }
     public uint UnkInt3 { get; }
 
     public long FileSize { get; set; }
@@ -18,40 +18,58 @@ public class ContainerIndexEntry
     public ContainerIndexEntry(BinaryReader reader, uint version)
     {
         FileName = reader.ReadUnicode(255);
-        EntryName = reader.ReadUnicode(127);
+        EntryName = version >= 12 ? reader.ReadUnicode(127) : string.Empty;
         Etag = reader.ReadUnicode(256);
 
         BlobId = reader.ReadByte();
-        UnkInt = reader.ReadUInt32();
-        if (UnkInt == 0) UnkInt = 1;
+        State = (ContainerIndexEntryState)reader.ReadUInt32();
+        if (State == ContainerIndexEntryState.None) State = ContainerIndexEntryState.Synched;
 
         ContainerId = new Guid(reader.ReadBytes(16));
-        LastModified = DateTime.FromFileTime(reader.ReadInt64());
-        UnkInt2 = reader.ReadUInt32();
-        UnkInt3 = reader.ReadUInt32();
+        LastModified = DateTime.FromFileTimeUtc(reader.ReadInt64());
+        Type = (ContainerEntryType)reader.ReadUInt32(); // Does not seem to be used anymore
+        UnkInt3 = reader.ReadUInt32(); // Padding?
         FileSize = version > 10 ? reader.ReadInt64() : reader.ReadInt32();
+    }
+
+    public ContainerIndexEntry(string fileName, string entryName)
+    {
+        FileName = fileName;
+        EntryName = entryName;
+        Etag = string.Empty;
+
+        BlobId = 1;
+        ContainerId = Guid.NewGuid();
+        LastModified = DateTime.Now;
+        State = ContainerIndexEntryState.Created;
     }
 
     public void Write(BinaryWriter writer, uint version)
     {
         writer.WriteUnicode(FileName, 255);
-        writer.WriteUnicode(EntryName, 127);
+        if (version >= 12) writer.WriteUnicode(EntryName, 127);
         writer.WriteUnicode(Etag, 256);
 
         writer.Write(BlobId);
-        writer.Write(UnkInt);
+        writer.Write((uint)State);
 
         writer.Write(ContainerId.ToByteArray());
         writer.Write(LastModified.ToFileTime());
-        writer.Write(UnkInt2);
+        writer.Write((uint)Type);
         writer.Write(UnkInt3);
         if (version > 10) writer.Write(FileSize);
         else writer.Write((uint)FileSize);
     }
 
-    public void Update(FileInfo newFileInfo)
+    public void SetModified(long fileSize)
     {
-        LastModified = newFileInfo.LastWriteTime;
-        FileSize = newFileInfo.Length;
+        FileSize = fileSize;
+        SetState(ContainerIndexEntryState.Modified);
+    }
+
+    public void SetState(ContainerIndexEntryState state)
+    {
+        LastModified = DateTime.Now;
+        State = state;
     }
 }

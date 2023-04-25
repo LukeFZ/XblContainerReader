@@ -3,53 +3,114 @@
 public class Container
 {
     public ContainerIndexEntry MetaData { get; }
-    public BlobRecords Records { get; }
+    public BlobRecords Blobs { get; private set; }
 
     private readonly string _containerPath;
 
     public Container(string basePath, ContainerIndexEntry info)
     {
         MetaData = info;
+        Blobs = new BlobRecords();
 
         _containerPath = Path.Join(basePath, info.ContainerId.ToStringWithoutDashes());
+    }
+
+    public void Load()
+    {
         if (!Directory.Exists(_containerPath))
             throw new InvalidDataException("Container directory does not exist.");
 
-        var blobRecordsPath = Path.Join(_containerPath, "container." + info.BlobId);
+        var blobRecordsPath = Path.Join(_containerPath, "container." + MetaData.BlobId);
         if (!File.Exists(blobRecordsPath))
             throw new InvalidDataException("Blob records file does not exist.");
 
         using var reader = new BinaryReader(File.OpenRead(blobRecordsPath));
-        Records = new BlobRecords(reader);
-        if (Records.Records.Length <= 0)
+        Blobs = new BlobRecords(reader);
+        if (Blobs.Records.Count <= 0)
             throw new InvalidDataException("Blob records file did not contain any blobs.");
     }
 
-    private string GetBlobPath(BlobRecord blob)
-    {
-        var blobPath = Path.Join(_containerPath, blob.BlobFileId.ToStringWithoutDashes());
-        if (!File.Exists(blobPath))
-            throw new InvalidDataException("Blob file does not exist.");
+    public Stream Open()
+        => OpenInternal(GetBlobPath(Blobs.Records.Single()));
 
-        return blobPath;
+    public Stream Open(string blobName)
+        => OpenInternal(GetBlobPath(GetBlob(blobName)));
+
+    public void Update(byte[] newFileData, string? blobName = null)
+    {
+        var blobPath = UpdateInternal(blobName);
+        File.WriteAllBytes(blobPath, newFileData);
+
+        var newFile = new FileInfo(blobPath);
+        MetaData.SetModified(newFile.Length);
     }
+
+    public async Task UpdateAsync(Stream newData, string? blobName = null)
+    {
+        var blobPath = UpdateInternal(blobName);
+
+        var blobStream = File.OpenWrite(blobPath);
+        await newData.CopyToAsync(blobStream);
+        blobStream.Close();
+
+        var newFile = new FileInfo(blobPath);
+        MetaData.SetModified(newFile.Length);
+    }
+
+    private string UpdateInternal(string? blobName)
+        => GetBlobPath(blobName == null ? Blobs.Records.Single() : GetBlob(blobName));
+
+    public void Add(string? blobName = null, byte[]? blobData = null)
+    {
+        var name = AddInternal(blobName);
+        if (blobData != null)
+            Update(blobData, name);
+    }
+
+    public async Task AddAsync(string? blobName = null, Stream? blobData = null)
+    {
+        var name = AddInternal(blobName);
+        if (blobData != null)
+            await UpdateAsync(blobData, name);
+    }
+
+    public void Remove(string? blobName = null)
+    {
+        if (Blobs.Count == 0)
+            throw new InvalidOperationException("Container does not contain any blocks.");
+
+        if (blobName == null && Blobs.Count > 1)
+            throw new ArgumentException(
+                "Blob name needs to be non-null when the container already contains a record.");
+
+        File.Delete(GetBlobPath(GetBlob(blobName ?? Blobs.Records.Single().Name)));
+        Blobs.Remove(blobName ?? Blobs.Records.Single().Name);
+    }
+
+    private string AddInternal(string? blobName = null)
+    {
+        if (blobName == null && Blobs.Count > 0)
+            throw new ArgumentException(
+                "Blob name needs to be non-null when the container already contains a record.");
+
+        blobName ??= "blob_0";
+        Blobs.Add(blobName);
+        return blobName;
+    }
+
+    private string GetBlobPath(BlobRecord blob)
+        => Path.Join(_containerPath, blob.BlobFileId.ToStringWithoutDashes());
 
     private BlobRecord GetBlob(string name)
     {
-        var blob = Records.Get(name);
+        var blob = Blobs.Get(name);
         if (blob == null)
             throw new InvalidDataException($"Blob with name {name} was not found in container.");
 
         return blob;
     }
 
-    public Stream Open()
-        => OpenInternal(GetBlobPath(Records.Records[0]));
-
-    public Stream Open(string blobName)
-        => OpenInternal(GetBlobPath(GetBlob(blobName)));
-
-    private Stream OpenInternal(string path)
+    private static Stream OpenInternal(string path)
     {
         if (!File.Exists(path))
             throw new InvalidDataException("Blob file does not exist.");
@@ -57,23 +118,10 @@ public class Container
         return File.OpenRead(path);
     }
 
-    public void Update(byte[] newFileData, string? blobName = null)
+    public void Write()
     {
-        var blobPath = GetBlobPath(blobName == null ? Records.Records[0] : GetBlob(blobName));
-        File.WriteAllBytes(blobPath, newFileData);
-        var newFile = new FileInfo(blobPath);
-        MetaData.Update(newFile);
-    }
-
-    public async Task UpdateAsync(Stream newData, string? blobName = null)
-    {
-        var blobPath = GetBlobPath(blobName == null ? Records.Records[0] : GetBlob(blobName));
-
-        var blobStream = File.OpenWrite(blobPath);
-        await newData.CopyToAsync(blobStream);
-        blobStream.Close();
-
-        var newFile = new FileInfo(blobPath);
-        MetaData.Update(newFile);
+        using var fs = File.OpenWrite(Path.Join(_containerPath, "container." + MetaData.BlobId));
+        using var writer = new BinaryWriter(fs);
+        Blobs.Write(writer);
     }
 }

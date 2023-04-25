@@ -27,5 +27,5 @@ internal static class Extensions
     }
 
     internal static string ToStringWithoutDashes(this Guid guid)
-        => guid.ToString().Replace("-", string.Empty);
+        => guid.ToString().Replace("-", string.Empty).ToUpper();
 }

@@ -6,14 +6,14 @@ public class ContainerIndexMetaData
     public int EntryCount { get; internal set; }
 
     // Metadata
-    public readonly string? NonAppOwner;
-    public readonly string? PackageOwner;
+    public readonly string? Name;
+    public readonly string? Aumid;
 
     // Sync Metadata
-    public readonly byte[]? UnkData; // Think this is title id but not 100% sure
-    public readonly ContainerSyncFlags Flags;
+    public DateTime LastModified { get; internal set; }
+    public ContainerSyncFlags Flags { get; internal set; }
     public readonly Guid RootContainerId;
-    public readonly byte[]? UnkData2;
+    public readonly byte[]? Reserved;
 
     public ContainerIndexMetaData(BinaryReader stream)
     {
@@ -22,11 +22,11 @@ public class ContainerIndexMetaData
         if (Version > 14) throw new InvalidDataException("Invalid container index version.");
         if (Version < 7) return;
 
-        NonAppOwner = stream.ReadUnicode();
-        PackageOwner = stream.ReadUnicode(130);
+        Name = stream.ReadUnicode();
+        Aumid = stream.ReadUnicode(130);
         if (Version <= 8) return;
 
-        UnkData = stream.ReadBytes(8);
+        LastModified = DateTime.FromFileTime(stream.ReadInt64());
         if (Version == 9)
         {
             Flags = stream.ReadByte() != 0 ? ContainerSyncFlags.FullyUploaded : ContainerSyncFlags.None;
@@ -37,7 +37,7 @@ public class ContainerIndexMetaData
 
         Flags = (ContainerSyncFlags)stream.ReadUInt32();
         if (Version >= 13) guid = stream.ReadUnicode();
-        if (Version >= 14) UnkData2 = stream.ReadBytes(8);
+        if (Version >= 14) Reserved = stream.ReadBytes(8);
 
         RootContainerId = string.IsNullOrEmpty(guid) ? Guid.Empty : Guid.Parse(guid);
     }
@@ -48,11 +48,11 @@ public class ContainerIndexMetaData
         writer.Write(EntryCount);
         if (Version < 7) return;
 
-        writer.WriteUnicode(NonAppOwner!);
-        writer.WriteUnicode(PackageOwner!, 130);
+        writer.WriteUnicode(Name!);
+        writer.WriteUnicode(Aumid!, 130);
         if (Version <= 8) return;
 
-        writer.Write(UnkData!);
+        writer.Write(LastModified.ToFileTime());
         if (Version == 9)
         {
             writer.Write(Flags == ContainerSyncFlags.FullyUploaded);
@@ -61,6 +61,6 @@ public class ContainerIndexMetaData
 
         writer.Write((uint)Flags);
         if (Version >= 13) writer.WriteUnicode(RootContainerId.ToString());
-        if (Version >= 14) writer.Write(UnkData2!);
+        if (Version >= 14) writer.Write(Reserved!);
     }
 }

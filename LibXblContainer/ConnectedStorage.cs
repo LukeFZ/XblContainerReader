@@ -1,37 +1,89 @@
-﻿using LibXblContainer.Models;
+﻿using System.Collections.ObjectModel;
+using LibXblContainer.Models;
 
-namespace LibXblContainer
+namespace LibXblContainer;
+
+public class ConnectedStorage : IDisposable
 {
-    public class ConnectedStorage
+    public ContainerIndex IndexMetadata { get; }
+    public ReadOnlyCollection<Container> Containers => _containers.AsReadOnly();
+
+    private readonly List<Container> _containers;
+    private readonly string _basePath;
+
+    public ConnectedStorage(string containerPath)
     {
-        public ContainerIndex IndexMetadata { get; }
-        public List<Container> Containers { get; }
+        _basePath = containerPath;
 
-        private readonly string _basePath;
+        var indexPath = Path.Join(_basePath, ContainerIndex.Name);
+        if (!File.Exists(indexPath))
+            throw new FileNotFoundException("Could not find container index in directory.");
 
-        public ConnectedStorage(string containerPath)
+        using var indexReader = new BinaryReader(File.OpenRead(indexPath));
+        IndexMetadata = new ContainerIndex(indexReader);
+
+        _containers = new List<Container>();
+        foreach (var container in IndexMetadata.Entries.Select(entry => new Container(_basePath, entry)))
         {
-            _basePath = containerPath;
+            container.Load();
+            _containers.Add(container);
+        }
+    }
 
-            var indexPath = Path.Join(_basePath, ContainerIndex.Name);
-            if (!File.Exists(indexPath))
-                throw new FileNotFoundException("Could not find container index in directory.");
+    public Container Add(string fileName, string entryName)
+    {
+        var metadataEntry = new ContainerIndexEntry(fileName, entryName);
+        var container = new Container(_basePath, metadataEntry);
 
-            using var indexReader = new BinaryReader(File.OpenRead(indexPath));
-            IndexMetadata = new ContainerIndex(indexReader);
+        IndexMetadata.Entries.Add(metadataEntry);
+        _containers.Add(container);
 
-            Containers = new List<Container>(IndexMetadata.Entries.Count);
-            foreach (var metadataEntry in IndexMetadata.Entries)
+        Directory.CreateDirectory(Path.Join(_basePath, metadataEntry.ContainerId.ToStringWithoutDashes()));
+
+        return container;
+    }
+
+    public void Remove(string name, bool isEntryName = false)
+    {
+        var container = Get(name, isEntryName);
+        if (container == null)
+            throw new ArgumentException($"Storage does not contain container with name {name}.");
+
+        Remove(container);
+    }
+
+    public void Remove(Container container)
+    {
+        //container.MetaData.FileSize = 0;
+        container.MetaData.SetState(ContainerIndexEntryState.Deleted);
+        //Directory.Delete(Path.Join(_basePath, container.MetaData.ContainerId.ToStringWithoutDashes()), true);
+    }
+
+    public Container? Get(string name, bool isEntryName = false)
+        => _containers.FirstOrDefault(x => isEntryName ? x.MetaData.EntryName == name : x.MetaData.FileName == name);
+
+    public void Write()
+    {
+        foreach (var container in _containers)
+        {
+            if (container.MetaData.State is not ContainerIndexEntryState.Synched)
             {
-                Containers.Add(new Container(_basePath, metadataEntry));
+                IndexMetadata.MetaData.Flags = ContainerSyncFlags.FullyDownloaded;
+                IndexMetadata.MetaData.LastModified = DateTime.Now;
             }
         }
 
-        public void Save()
-        {
-            var indexPath = Path.Join(_basePath, ContainerIndex.Name);
-            using var indexWriter = new BinaryWriter(File.OpenWrite(indexPath));
-            IndexMetadata.Write(indexWriter);
-        }
+        var indexPath = Path.Join(_basePath, ContainerIndex.Name);
+        using var indexWriter = new BinaryWriter(File.OpenWrite(indexPath));
+        IndexMetadata.Write(indexWriter);
+
+        foreach (var container in _containers)
+            container.Write();
+    }
+
+    public void Dispose()
+    {
+        Write();
+        GC.SuppressFinalize(this);
     }
 }

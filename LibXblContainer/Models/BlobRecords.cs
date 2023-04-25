@@ -1,34 +1,57 @@
-﻿namespace LibXblContainer.Models;
+﻿using System.Collections.ObjectModel;
 
-public readonly struct BlobRecords
+namespace LibXblContainer.Models;
+
+public class BlobRecords
 {
-    public readonly uint Version;
-    public readonly uint Count;
-    public readonly BlobRecord[] Records;
+    public const uint Version = 4;
+    public ReadOnlyCollection<BlobRecord> Records => _records.AsReadOnly();
+    public int Count => Records.Count;
 
-    public BlobRecords(BinaryReader reader)
+    private readonly List<BlobRecord> _records;
+
+    public BlobRecords()
     {
-        Version = reader.ReadUInt32();
-        if (Version != 4)
+        _records = new List<BlobRecord>();
+    }
+
+    public BlobRecords(BinaryReader reader) : this()
+    {
+        var version = reader.ReadUInt32();
+        if (version != Version)
             throw new InvalidDataException("Invalid blob records version.");
 
-        Count = reader.ReadUInt32();
-        Records = new BlobRecord[Count];
-
-        for (var i = 0; i < Count; i++)
-        {
-            Records[i] = new BlobRecord(reader);
-        }
+        var count = reader.ReadUInt32();
+        for (uint i = 0; i < count; i++)
+            _records.Add(new BlobRecord(reader));
     }
 
     public BlobRecord? Get(string name)
-        => Records.FirstOrDefault(record => record.Name == name);
+        => _records.FirstOrDefault(record => record.Name == name);
+
+    public BlobRecord Add(string name)
+    {
+        if (_records.Any(x => x.Name == name))
+            throw new ArgumentException($"Blob with name {name} already exists in container.");
+
+        var record = new BlobRecord(name);
+        _records.Add(record);
+        return record;
+    }
+
+    public void Remove(string name)
+    {
+        if (_records.All(x => x.Name != name))
+            throw new ArgumentException($"Blob with name {name} does not exist in container.");
+
+        _records.Remove(_records.First(x => x.Name == name));
+    }
 
     public void Write(BinaryWriter writer)
     {
         writer.Write(Version);
-        writer.Write(Count);
-        foreach (var record in Records)
+        writer.Write(_records.Count);
+        foreach (var record in _records)
             record.Write(writer);
     }
 }

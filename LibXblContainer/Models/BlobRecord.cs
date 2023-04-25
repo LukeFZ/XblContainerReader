@@ -8,6 +8,13 @@ public record BlobRecord
     public readonly Guid BlobAtomId; // TODO: Unsure about this
     public readonly Guid BlobFileId;
 
+    public BlobRecord(string name, Guid atomId = default, Guid fileId = default)
+    {
+        Name = name;
+        BlobFileId = fileId == Guid.Empty ? Guid.NewGuid() : fileId;
+        BlobAtomId = atomId == Guid.Empty ? BlobFileId : atomId;
+    }
+
     public BlobRecord(BinaryReader reader)
     {
         var blobData = reader.ReadBytes(0x80);

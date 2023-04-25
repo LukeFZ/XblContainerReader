@@ -1,4 +1,5 @@
 ﻿using LibXblContainer;
+using System.Text;
 
 namespace XblContainerReader
 {
@@ -14,7 +15,7 @@ namespace XblContainerReader
 
             var containerPath = args[1];
             var secondPath = args[2];
-            var storage = new ConnectedStorage(containerPath);
+            using var storage = new ConnectedStorage(containerPath);
 
             switch (args[0])
             {
@@ -43,10 +44,10 @@ namespace XblContainerReader
                 Console.WriteLine("\tSize: " + entry.MetaData.FileSize);
                 Console.WriteLine("\tLast modified: " + entry.MetaData.LastModified);
 
-                if (entry.Records.Count > 1)
+                if (entry.Blobs.Count > 1)
                 {
                     Directory.CreateDirectory(Path.Join(output, entryName));
-                    foreach (var blob in entry.Records.Records)
+                    foreach (var blob in entry.Blobs.Records)
                     {
                         Console.WriteLine("\t\tBlob name: " + blob.Name);
 
@@ -72,38 +73,92 @@ namespace XblContainerReader
         private static void UpdateCommand(ConnectedStorage storage, string input)
         {
             Console.WriteLine($"File status for container:");
-            foreach (var entry in storage.Containers)
+            var containers = storage.Containers.ToList();
+            var newContainers = Directory.EnumerateFiles(input, "*", SearchOption.AllDirectories).Select(x => x.Replace('\\', '/')).ToList();
+            Console.WriteLine(string.Join(',', newContainers));
+
+            var containerAdditionEnabled = true;
+
+            foreach (var entry in containers)
             {
                 var entryName = entry.MetaData.EntryName;
+                var containerPath = Path.Join(input, entryName).Replace('\\', '/');
 
-                if (entry.Records.Count > 1)
+                if (!newContainers.Contains(containerPath))
                 {
-                    foreach (var blob in entry.Records.Records)
+                    Console.WriteLine("\tContainer name: " + entryName);
+                    Console.WriteLine("\t\tRemoved container.");
+                    storage.Remove(entry);
+                    continue;
+                }
+
+                if (entry.Blobs.Count > 1)
+                {
+                    containerAdditionEnabled = false;
+
+                    var blobs = entry.Blobs.Records.ToList();
+                    var newBlobs = Directory.EnumerateFiles(containerPath).Select(x => x.Replace("\\", "/")).ToList();
+
+                    foreach (var blob in blobs)
                     {
                         Console.WriteLine("\tBlob name: " + blob.Name);
-                        var blobPath = Path.Join(input, entryName, blob.Name);
-                        if (!File.Exists(blobPath)) continue;
+                        var blobPath = Path.Join(containerPath, blob.Name).Replace("\\", "/");
+                        if (!newContainers.Contains(blobPath))
+                        {
+                            entry.Remove(blob.Name);
+                            Console.WriteLine("\t\tRemoved blob.");
+                            continue;
+                        }
 
                         var newData = File.ReadAllBytes(blobPath);
                         entry.Update(newData, blob.Name);
 
                         Console.WriteLine("\t\tUpdated blob.");
+                        newBlobs.Remove(blobPath);
+                        newContainers.Remove(blobPath);
+                    }
+
+                    foreach (var file in newBlobs)
+                    {
+                        var blobName = Path.GetFileName(file);
+                        entry.Add(blobName, File.ReadAllBytes(file));
+                        Console.WriteLine("\tBlob name: " + blobName);
+                        Console.WriteLine("\t\tAdded blob.");
+                        newContainers.Remove(file);
                     }
                 }
                 else
                 {
                     Console.WriteLine("\tFile name: " + entryName);
-                    var containerFilePath = Path.Join(input, entryName);
-                    if (!File.Exists(containerFilePath)) continue;
-
-                    var newData = File.ReadAllBytes(containerFilePath);
+                    var newData = File.ReadAllBytes(containerPath);
                     entry.Update(newData);
 
                     Console.WriteLine("\t\tUpdated file.");
                 }
+
+                newContainers.Remove(containerPath);
             }
 
-            storage.Save();
+            if (containerAdditionEnabled)
+            {
+                foreach (var newContainer in newContainers)
+                {
+                    var containerName = newContainer.Replace(input + '/', "");
+
+                    // Important: This is not game agnostic!
+                    var container = storage.Add(Convert.ToBase64String(Encoding.UTF8.GetBytes(containerName)),
+                        containerName);
+
+                    container.Add(null, File.ReadAllBytes(newContainer));
+
+                    Console.WriteLine("\tContainer name: " + containerName);
+                    Console.WriteLine("\t\tAdded container.");
+                }
+            }
+            else
+            {
+                Console.WriteLine("Container addition disabled due to detecting multiple blobs being present in one container.");
+            }
         }
 
         private static void PrintHelp()
@@ -112,6 +167,7 @@ namespace XblContainerReader
             Console.WriteLine("Commands:");
             Console.WriteLine("\textract - extracts files from the container into the output directory");
             Console.WriteLine("\tupdate - updates files inside the container from the input directory");
+            Console.WriteLine("\tIMPORTANT: Adding new containers using the \"update\" command is not guaranteed to work, as it does not currently work for games with more than one file per container.");
         }
     }
 }
