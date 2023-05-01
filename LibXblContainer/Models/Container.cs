@@ -20,9 +20,12 @@ public class Container
         if (!Directory.Exists(_containerPath))
             throw new InvalidDataException("Container directory does not exist.");
 
+        if (MetaData.State == ContainerIndexEntryState.Deleted)
+            return;
+
         var blobRecordsPath = Path.Join(_containerPath, "container." + MetaData.BlobId);
         if (!File.Exists(blobRecordsPath))
-            throw new InvalidDataException("Blob records file does not exist.");
+            throw new InvalidDataException($"Blob records file does not exist for container {MetaData.EntryName}.");
 
         using var reader = new BinaryReader(File.OpenRead(blobRecordsPath));
         Blobs = new BlobRecords(reader);

@@ -1,5 +1,6 @@
 ﻿using LibXblContainer;
 using System.Text;
+using LibXblContainer.Models;
 
 namespace XblContainerReader
 {
@@ -38,6 +39,9 @@ namespace XblContainerReader
             Console.WriteLine($"File list for container:");
             foreach (var entry in storage.Containers)
             {
+                if (entry.MetaData.State == ContainerIndexEntryState.Deleted)
+                    continue;
+
                 var entryName = entry.MetaData.EntryName;
                 Console.WriteLine("\tFile name: " + entry.MetaData.FileName);
                 Console.WriteLine("\tEntry name: " + entryName);
@@ -81,6 +85,9 @@ namespace XblContainerReader
 
             foreach (var entry in containers)
             {
+                if (entry.MetaData.State == ContainerIndexEntryState.Deleted)
+                    continue;
+
                 var entryName = entry.MetaData.EntryName;
                 var containerPath = Path.Join(input, entryName).Replace('\\', '/');
 
