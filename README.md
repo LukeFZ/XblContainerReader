@@ -4,7 +4,7 @@
 
 ## Requirements
 
-- [.NET 7.0](https://dotnet.microsoft.com/en-us/download/dotnet/7.0) installed
+- [.NET 8.0](https://dotnet.microsoft.com/en-us/download/dotnet/8.0) installed
 
 ## Usage
 
@@ -19,5 +19,5 @@ Commands:
 ```
 
 ## For Developers
-The library also targets .NET 7, and has no other dependencies.  
+The library also targets .NET 8, and has no other dependencies.  
 Microsoft's own implementation can be found in XblGameSave.dll in your System32 folder, as well as some APIs in the `Windows.Gaming.XboxLive.Storage` namespace. 
