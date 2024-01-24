@@ -1,180 +1,235 @@
-﻿using LibXblContainer;
-using System.Text;
+﻿using System.ComponentModel;
+using System.Diagnostics;
+using LibXblContainer;
 using LibXblContainer.Models;
+using Spectre.Console;
+using Spectre.Console.Cli;
+using Spectre.Console.Rendering;
 
 namespace XblContainerReader
 {
     internal class Program
     {
-        private static void Main(string[] args)
+        private static async Task<int> Main(string[] args)
         {
-            if (args.Length != 3)
+            var app = new CommandApp();
+            app.Configure(config =>
             {
-                PrintHelp();
-                return;
-            }
+                config.PropagateExceptions();
+                config.AddCommand<InfoCommand>("info").WithDescription("Prints information about a storage.");
+                config.AddCommand<ExtractCommand>("extract").WithDescription("Extracts containers/blobs.");
+                config.AddCommand<ImportCommand>("import").WithDescription("Clears a storage and imports a folder into it.");
+            });
+            return await app.RunAsync(args);
+        }
+    }
 
-            var containerPath = args[1];
-            var secondPath = args[2];
-            using var storage = new ConnectedStorage(containerPath);
+    internal class ContainerSettings : CommandSettings
+    {
+        [CommandArgument(0, "<container>")]
+        public required string ContainerPath { get; init; }
 
-            switch (args[0])
-            {
-                case "extract":
-                    ExtractCommand(storage, secondPath);
-                    break;
-                case "update":
-                    UpdateCommand(storage, secondPath);
-                    break;
-                default:
-                    PrintHelp();
-                    break;
-            }
+        [CommandOption("-t|--type")]
+        [Description("Which platform the container is used by. Affects container/blob filenames. Allowed values: Windows, Xbox")]
+        [DefaultValue(StoragePlatformType.Windows)]
+        public StoragePlatformType StorageType { get; init; }
+    }
+
+    internal abstract class ContainerCommand<T> : Command<T> where T : ContainerSettings
+    {
+        public override ValidationResult Validate(CommandContext context, T settings)
+        {
+            if (!File.Exists(Path.Join(settings.ContainerPath, ContainerIndex.Name)))
+                return ValidationResult.Error("container.index does not exist.");
+
+            return base.Validate(context, settings);
+        }
+    }
+
+    internal abstract class AsyncContainerCommand<T> : AsyncCommand<T> where T : ContainerSettings
+    {
+        public override ValidationResult Validate(CommandContext context, T settings)
+        {
+            if (!File.Exists(Path.Join(settings.ContainerPath, ContainerIndex.Name)))
+                return ValidationResult.Error("container.index does not exist.");
+
+            return base.Validate(context, settings);
+        }
+    }
+
+    internal enum ContainerMode
+    {
+        SingleFileContainer,
+        SingleFileBlob
+    }
+
+    internal sealed class InfoCommand : ContainerCommand<InfoCommand.Settings>
+    {
+        internal sealed class Settings : ContainerSettings
+        {
+            [CommandOption("-l|--log")]
+            public string? LogFilePath { get; init; }
         }
 
-        private static void ExtractCommand(ConnectedStorage storage, string output)
+        public override int Execute(CommandContext context, Settings settings)
         {
-            Directory.CreateDirectory(output);
+            var treePanel = new Tree("[white bold]Storage contents:[/]");
 
-            Console.WriteLine($"File list for container:");
-            foreach (var entry in storage.Containers)
+            if (File.Exists(Path.Join(settings.ContainerPath, ContainerIndex.Name)))
             {
-                if (entry.MetaData.State == ContainerIndexEntryState.Deleted)
-                    continue;
-
-                var entryName = entry.MetaData.EntryName;
-                Console.WriteLine("\tFile name: " + entry.MetaData.FileName);
-                Console.WriteLine("\tEntry name: " + entryName);
-                Console.WriteLine("\tSize: " + entry.MetaData.FileSize);
-                Console.WriteLine("\tLast modified: " + entry.MetaData.LastModified);
-
-                if (entry.Blobs.Count > 1)
-                {
-                    Directory.CreateDirectory(Path.Join(output, entryName));
-                    foreach (var blob in entry.Blobs.Records)
-                    {
-                        Console.WriteLine("\t\tBlob name: " + blob.Name);
-
-                        using var outFile = File.OpenWrite(Path.Join(output, entryName, blob.Name));
-                        using var inFile = entry.Open(blob.Name);
-
-                        inFile.CopyTo(outFile);
-                    }
-                }
-                else
-                {
-                    if (entryName.Contains('/'))
-                        Directory.CreateDirectory(Path.Join(output, entryName[..entryName.LastIndexOf('/')]));
-
-                    using var outFile = File.OpenWrite(Path.Join(output, entryName));
-                    using var inFile = entry.Open();
-
-                    inFile.CopyTo(outFile);
-                }
-            }
-        }
-
-        private static void UpdateCommand(ConnectedStorage storage, string input)
-        {
-            Console.WriteLine($"File status for container:");
-            var containers = storage.Containers.ToList();
-            var newContainers = Directory.EnumerateFiles(input, "*", SearchOption.AllDirectories).Select(x => x.Replace('\\', '/')).ToList();
-            Console.WriteLine(string.Join(',', newContainers));
-
-            var containerAdditionEnabled = true;
-
-            foreach (var entry in containers)
-            {
-                if (entry.MetaData.State == ContainerIndexEntryState.Deleted)
-                    continue;
-
-                var entryName = entry.MetaData.EntryName;
-                var containerPath = Path.Join(input, entryName).Replace('\\', '/');
-
-                if (!newContainers.Contains(containerPath))
-                {
-                    Console.WriteLine("\tContainer name: " + entryName);
-                    Console.WriteLine("\t\tRemoved container.");
-                    storage.Remove(entry);
-                    continue;
-                }
-
-                if (entry.Blobs.Count > 1)
-                {
-                    containerAdditionEnabled = false;
-
-                    var blobs = entry.Blobs.Records.ToList();
-                    var newBlobs = Directory.EnumerateFiles(containerPath).Select(x => x.Replace("\\", "/")).ToList();
-
-                    foreach (var blob in blobs)
-                    {
-                        Console.WriteLine("\tBlob name: " + blob.Name);
-                        var blobPath = Path.Join(containerPath, blob.Name).Replace("\\", "/");
-                        if (!newContainers.Contains(blobPath))
-                        {
-                            entry.Remove(blob.Name);
-                            Console.WriteLine("\t\tRemoved blob.");
-                            continue;
-                        }
-
-                        var newData = File.ReadAllBytes(blobPath);
-                        entry.Update(newData, blob.Name);
-
-                        Console.WriteLine("\t\tUpdated blob.");
-                        newBlobs.Remove(blobPath);
-                        newContainers.Remove(blobPath);
-                    }
-
-                    foreach (var file in newBlobs)
-                    {
-                        var blobName = Path.GetFileName(file);
-                        entry.Add(blobName, File.ReadAllBytes(file));
-                        Console.WriteLine("\tBlob name: " + blobName);
-                        Console.WriteLine("\t\tAdded blob.");
-                        newContainers.Remove(file);
-                    }
-                }
-                else
-                {
-                    Console.WriteLine("\tFile name: " + entryName);
-                    var newData = File.ReadAllBytes(containerPath);
-                    entry.Update(newData);
-
-                    Console.WriteLine("\t\tUpdated file.");
-                }
-
-                newContainers.Remove(containerPath);
-            }
-
-            if (containerAdditionEnabled)
-            {
-                foreach (var newContainer in newContainers)
-                {
-                    var containerName = newContainer.Replace(input + '/', "");
-
-                    // Important: This is not game agnostic!
-                    var container = storage.Add(Convert.ToBase64String(Encoding.UTF8.GetBytes(containerName)),
-                        containerName);
-
-                    container.Add(null, File.ReadAllBytes(newContainer));
-
-                    Console.WriteLine("\tContainer name: " + containerName);
-                    Console.WriteLine("\t\tAdded container.");
-                }
+                using var storage = new ConnectedStorage(settings.ContainerPath, settings.StorageType, true);
+                OutputUtils.DrawStorage(treePanel, storage);
             }
             else
             {
-                Console.WriteLine("Container addition disabled due to detecting multiple blobs being present in one container.");
+                foreach (var container in Directory
+                             .EnumerateDirectories(settings.ContainerPath, "*", SearchOption.AllDirectories)
+                             .Where(x => File.Exists(Path.Join(x, ContainerIndex.Name)))
+                        )
+                {
+                    using var storage = new ConnectedStorage(container, settings.StorageType, true);
+                    OutputUtils.DrawStorage(treePanel, storage);
+                }
             }
+
+            AnsiConsole.Record();
+            AnsiConsole.Write(treePanel);
+            var log = AnsiConsole.ExportText();
+
+            if (settings.LogFilePath != null)
+                File.WriteAllText(settings.LogFilePath, log);
+
+            return 0;
         }
 
-        private static void PrintHelp()
+        public override ValidationResult Validate(CommandContext context, Settings settings)
         {
-            Console.WriteLine("Usage: XblContainerReader.exe <command> <path to container folder> <input/output path>");
-            Console.WriteLine("Commands:");
-            Console.WriteLine("\textract - extracts files from the container into the output directory");
-            Console.WriteLine("\tupdate - updates files inside the container from the input directory");
-            Console.WriteLine("\tIMPORTANT: Adding new containers using the \"update\" command is not guaranteed to work, as it does not currently work for games with more than one file per container.");
+            if (!Directory.Exists(settings.ContainerPath))
+                return ValidationResult.Error("Input directory does not exist.");
+
+            return ValidationResult.Success();
+        }
+    }
+
+    internal sealed class ExtractCommand : ContainerCommand<ExtractCommand.Settings>
+    {
+        internal sealed class Settings : ContainerSettings
+        {
+            [CommandArgument(1, "<output>")]
+            public required string OutputPath { get; init; }
+
+            [CommandOption("-m|--mode")]
+            [Description("Forces parsing as a specific container mode. Allowed values: SingleFileContainer, SingleFileBlob")]
+            public ContainerMode? Mode { get; init; }
+        }
+
+        public override int Execute(CommandContext context, Settings settings)
+        {
+            using var storage = new ConnectedStorage(settings.ContainerPath, settings.StorageType, true);
+
+            Directory.CreateDirectory(settings.OutputPath);
+
+            foreach (var container in storage.Containers)
+            {
+                if (container.MetaData.State == ContainerIndexEntryState.Deleted)
+                    continue;
+
+                var containerOutputPath = Path.Join(settings.OutputPath, container.MetaData.FileName);
+
+                if (settings.Mode == ContainerMode.SingleFileContainer || (!settings.Mode.HasValue && container.Blobs.Count == 1))
+                {
+                    if (container.Blobs.Count != 1)
+                        throw new InvalidOperationException(
+                            "Cannot extract container with multiple blobs in SingleFileContainer mode");
+
+                    if (container.MetaData.FileName.Contains('/'))
+                        Directory.CreateDirectory(Directory.GetParent(containerOutputPath)!.FullName);
+
+                    using var outFile = File.OpenWrite(containerOutputPath);
+                    using var inFile = container.Open();
+
+                    inFile.CopyTo(outFile);
+                }
+                else
+                {
+                    Directory.CreateDirectory(containerOutputPath);
+
+                    foreach (var blob in container.Blobs.Records)
+                    {
+                        var blobOutputPath = Path.Join(containerOutputPath, blob.Name);
+
+                        using var output = File.OpenWrite(blobOutputPath);
+                        using var input = container.Open(blob.Name);
+
+                        input.CopyTo(output);
+                    }
+                }
+            }
+
+            AnsiConsole.MarkupLine("[green bold]Successfully extracted containers.[/]");
+
+            return 0;
+        }
+    }
+
+    internal sealed class ImportCommand : AsyncContainerCommand<ImportCommand.Settings>
+    {
+        internal sealed class Settings : ContainerSettings
+        {
+            [CommandArgument(1, "<input>")]
+            public required string InputPath { get; init; }
+
+            [CommandOption("-m|--mode")]
+            [Description("Sets the mode using for importing the files into containers. Allowed values: SingleFileContainer, SingleFileBlob")]
+            public ContainerMode Mode { get; init; }
+        }
+
+        public override async Task<int> ExecuteAsync(CommandContext context, Settings settings)
+        {
+            using (var storage = new ConnectedStorage(settings.ContainerPath, settings.StorageType))
+            {
+                foreach (var container in storage.Containers)
+                    storage.Remove(container);
+
+                var fullInputPath = Path.GetFullPath(settings.InputPath);
+
+                foreach (var file in Directory.EnumerateFiles(settings.InputPath, "*", SearchOption.AllDirectories))
+                {
+                    switch (settings.Mode)
+                    {
+                        case ContainerMode.SingleFileContainer:
+                        {
+                            var containerName = file[fullInputPath.Length..].Replace("\\", "/");
+                            var container = storage.Add(containerName, containerName);
+                            await using var input = File.OpenRead(file);
+                            await container.AddAsync(blobData: input);
+                            break;
+                        }
+                        case ContainerMode.SingleFileBlob:
+                        {
+                            var containerName = Directory.GetParent(file)!.FullName[fullInputPath.Length..].Replace("\\", "/");
+                            var container = storage.Get(containerName) ?? storage.Add(containerName, containerName);
+                            await using var input = File.OpenRead(file);
+                            await container.AddAsync(Path.GetFileName(file), input);
+                            break;
+                        }
+                        default:
+                            throw new UnreachableException();
+                    }
+                }
+            }
+
+            AnsiConsole.MarkupLine("[green bold]Successfully imported containers.[/]");
+
+            return 0;
+        }
+
+        public override ValidationResult Validate(CommandContext context, Settings settings)
+        {
+            if (!Directory.Exists(settings.InputPath))
+                return ValidationResult.Error("Input directory does not exist.");
+
+            return base.Validate(context, settings);
         }
     }
 }

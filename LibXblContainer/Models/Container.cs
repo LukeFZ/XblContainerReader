@@ -1,4 +1,6 @@
-﻿namespace LibXblContainer.Models;
+﻿using LibXblContainer.Models.FileNames;
+
+namespace LibXblContainer.Models;
 
 public class Container
 {
@@ -6,13 +8,23 @@ public class Container
     public BlobRecords Blobs { get; private set; }
 
     private readonly string _containerPath;
+    private readonly IFileNameFormat _fileNameFormat;
 
-    public Container(string basePath, ContainerIndexEntry info)
+    public Container(string basePath, ContainerIndexEntry info, IFileNameFormat fileNameFormat)
     {
         MetaData = info;
         Blobs = new BlobRecords();
 
-        _containerPath = Path.Join(basePath, info.ContainerId.ToStringWithoutDashes());
+        _containerPath = Path.Join(basePath, fileNameFormat.GetFileName(info.ContainerId));
+        _fileNameFormat = fileNameFormat;
+    }
+
+    public void Create()
+    {
+        if (Directory.Exists(_containerPath))
+            throw new InvalidDataException("Container directory already exists");
+
+        Directory.CreateDirectory(_containerPath);
     }
 
     public void Load()
@@ -102,13 +114,13 @@ public class Container
     }
 
     private string GetBlobPath(BlobRecord blob)
-        => Path.Join(_containerPath, blob.BlobFileId.ToStringWithoutDashes());
+        => Path.Join(_containerPath, _fileNameFormat.GetFileName(blob.BlobFileId));
 
     private BlobRecord GetBlob(string name)
     {
-        var blob = Blobs.Get(name);
-        if (blob == null)
-            throw new InvalidDataException($"Blob with name {name} was not found in container.");
+        var blob =
+            Blobs.Get(name)
+            ?? throw new InvalidDataException($"Blob with name {name} was not found in container.");
 
         return blob;
     }

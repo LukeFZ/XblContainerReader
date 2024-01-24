@@ -32,14 +32,14 @@ public class ContainerIndexEntry
         FileSize = version > 10 ? reader.ReadInt64() : reader.ReadInt32();
     }
 
-    public ContainerIndexEntry(string fileName, string entryName)
+    public ContainerIndexEntry(string fileName, string entryName, Guid? entryGuid = null)
     {
         FileName = fileName;
         EntryName = entryName;
         Etag = string.Empty;
 
         BlobId = 1;
-        ContainerId = Guid.NewGuid();
+        ContainerId = entryGuid ?? Guid.NewGuid();
         LastModified = DateTime.Now;
         State = ContainerIndexEntryState.Created;
     }
